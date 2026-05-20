@@ -1,0 +1,110 @@
+# ============================================
+# voice-aider — .gitignore
+# ============================================
+
+# ----- Secrets -----
+.env
+.env.local
+.env.*.local
+*.key
+secrets/
+
+# ----- Runtime IPC bridge -----
+tmp/
+!tmp/.gitkeep
+*.state.json
+
+# ----- Audio dumps / recordings -----
+*.wav
+*.mp3
+*.flac
+*.ogg
+recordings/
+debug_audio/
+
+# ----- Aider artifacts -----
+.aider*
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v3/
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ----- Virtual environments -----
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ----- Testing / coverage -----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# ----- Type checkers / linters -----
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# ----- Streamlit -----
+.streamlit/secrets.toml
+.streamlit/cache/
+
+# ----- Logs -----
+*.log
+logs/
+log/
+
+# ----- IDE / editors -----
+.vscode/
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- Jupyter -----
+.ipynb_checkpoints/
+*.ipynb
+
+# ----- OS junk -----
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
