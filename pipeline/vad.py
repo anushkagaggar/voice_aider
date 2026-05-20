@@ -20,12 +20,19 @@ Returns one int16 numpy array per utterance, same shape as capture_ptt().
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import webrtcvad
 
 from config.settings import settings
-from pipeline.capture import MicCapture
 from utils.logger import get_logger
+
+if TYPE_CHECKING:
+    # Avoid importing pipeline.capture at module load — it pulls in sounddevice,
+    # which fails in environments without PortAudio (CI, tests). MicCapture is
+    # only referenced in type hints.
+    from pipeline.capture import MicCapture
 
 log = get_logger(__name__)
 

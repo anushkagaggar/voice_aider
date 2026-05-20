@@ -1,0 +1,137 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ============================================================================
+# Project metadata
+# ============================================================================
+[project]
+name = "voice-aider"
+version = "0.1.0"
+description = "Voice input interface for the aider terminal coding agent — Groq Whisper + LangGraph + Streamlit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "voice-aider" },
+]
+keywords = ["voice", "stt", "aider", "langgraph", "groq", "coding-agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Capture/Recording",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Runtime deps mirror requirements.txt. We keep both so:
+#   - `pip install -r requirements.txt` works for a quick dev install
+#   - `pip install -e .` works for editable / packaged use
+# requirements.txt is the source of truth; this list is regenerated from it.
+dependencies = [
+    "langgraph>=0.2.50",
+    "langchain-core>=0.3.20",
+    "groq>=0.13.0",
+    "streamlit>=1.39.0",
+    "streamlit-autorefresh>=1.0.1",
+    "sounddevice>=0.5.0",
+    "numpy>=1.26.0",
+    "scipy>=1.13.0",
+    "webrtcvad>=2.0.10",
+    "pynput>=1.7.7",
+    "rapidfuzz>=3.10.0",
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "aider-chat>=0.60.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+]
+
+[project.scripts]
+# Lets the user run `voice-aider-pipeline` instead of `python -m pipeline.main`
+# after `pip install -e .`. Optional convenience — both work.
+voice-aider-pipeline = "pipeline.main:run"
+
+# ============================================================================
+# Package discovery
+# ============================================================================
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["config*", "graph*", "groq_clients*", "pipeline*", "ui*", "utils*"]
+exclude = ["tests*", "tmp*"]
+
+# ============================================================================
+# pytest
+# ============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",                  # short summary of all non-passing outcomes
+    "--strict-markers",     # typo'd markers fail loudly
+    "--tb=short",           # less noise in tracebacks
+]
+filterwarnings = [
+    # Pydantic v2 emits deprecation warnings from langchain-core that we can't fix.
+    "ignore::DeprecationWarning:langchain_core.*",
+    "ignore::DeprecationWarning:pydantic.*",
+    # webrtcvad still uses the deprecated pkg_resources API — not our problem.
+    "ignore::DeprecationWarning:webrtcvad",
+]
+
+# ============================================================================
+# ruff (lint + format)
+# ============================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",  # line too long — we set line-length above, but tolerate long log strings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]   # `assert False` is fine in test failures
+"**/__init__.py" = ["F401"]  # re-exports are intentional
+
+# ============================================================================
+# mypy
+# ============================================================================
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+# These third-party libs ship without stubs.
+[[tool.mypy.overrides]]
+module = [
+    "sounddevice",
+    "webrtcvad",
+    "pynput.*",
+    "streamlit_autorefresh",
+    "rapidfuzz.*",
+]
+ignore_missing_imports = true
