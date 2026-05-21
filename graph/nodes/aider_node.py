@@ -73,6 +73,8 @@ class _AiderSession:
             cmd = [
                 "aider",
                 "--model", settings.AIDER_MODEL,
+                "--no-pretty",          # disable prompt_toolkit / colored output
+                "--no-stream",          # one-shot replies instead of streaming
                 *settings.aider_args_list,
             ]
             log.info("Starting aider: %s", " ".join(shlex.quote(c) for c in cmd))
