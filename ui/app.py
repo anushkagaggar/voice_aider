@@ -24,6 +24,16 @@ Refresh model:
 
 from __future__ import annotations
 
+# ---- sys.path bootstrap ----
+# Streamlit launches this script with its own working directory and may strip
+# the project root from sys.path. We restore it explicitly so the project's
+# packages always resolve, no matter how the user launched the app.
+import sys as _sys
+from pathlib import Path as _Path
+_PROJECT_ROOT = _Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_PROJECT_ROOT))
+
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
