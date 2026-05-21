@@ -69,7 +69,7 @@ def new_state(audio_bytes: bytes) -> VoiceState:
         audio_duration=0.0,
         retry_count=0,
         should_retry=False,
-        prev_transcript=""
+        prev_transcript="",
         intent="unknown",
         action=None,
         aider_response=None,
