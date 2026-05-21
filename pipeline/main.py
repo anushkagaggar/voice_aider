@@ -88,6 +88,21 @@ def run() -> None:
     graph = build_graph()
     mic = MicCapture()
 
+    # Pre-warm aider so the first command (clear/undo/exit) works.
+    # Without this, command-as-first-utterance crashes because execute_cmd
+    # tries to send /clear to a subprocess that hasn't been started.
+    log.info("Pre-warming aider subprocess (this takes ~3-5s)…")
+    _publish_status("⏳ starting aider…")
+    try:
+        aider_session.start()
+        log.info("Aider ready.")
+    except FileNotFoundError:
+        log.error("aider executable not found — install with `pip install aider-chat`")
+        return
+    except Exception as e:
+        log.exception("Aider failed to start: %s", e)
+        return
+
     try:
         mic.start()
         _publish_status("🎙️  ready — speak now" if settings.HANDS_FREE_MODE

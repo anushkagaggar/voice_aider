@@ -31,18 +31,15 @@ NODE_WRITE_STATE = "write_state_node"
 def route_after_confidence(state: VoiceState) -> Literal["stt_node", "classify_node"]:
     """
     After confidence_node:
-      - if retry_count was bumped (and is now still within budget), loop back to stt_node
+      - if confidence_node set should_retry=True, loop back to stt_node
       - else proceed to classify_node
-    """
-    confidence = state.get("confidence", 0.0)
-    retry_count = state.get("retry_count", 0)
-    transcript = (state.get("transcript") or "").strip()
 
-    needs_retry = (not transcript) or confidence < settings.CONFIDENCE_THRESHOLD
-    if needs_retry and retry_count <= settings.MAX_STT_RETRIES and retry_count > 0:
-        # retry_count > 0 means confidence_node decided to retry on this pass
-        return NODE_STT
-    return NODE_CLASSIFY
+    We use an explicit `should_retry` flag in state rather than inferring
+    from retry_count, because retry_count is monotonic across the whole
+    graph run — once it hits MAX_STT_RETRIES, every subsequent low-confidence
+    pass would loop forever if we routed on retry_count alone.
+    """
+    return NODE_STT if state.get("should_retry") else NODE_CLASSIFY
 
 
 def route_after_classify(state: VoiceState) -> Literal["execute_cmd", "aider_node", "write_state_node"]:

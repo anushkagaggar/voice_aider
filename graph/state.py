@@ -45,6 +45,10 @@ class VoiceState(TypedDict, total=False):
     # ---- Retry control ----
     retry_count: int                # incremented by confidence_node; max = MAX_STT_RETRIES
 
+    # ---- Retry control ----
+    retry_count: int                # incremented by confidence_node; max = MAX_STT_RETRIES
+    should_retry: bool              # set by confidence_node, read by route_after_confidence
+
     # ---- Classification outputs ----
     intent: Literal["cmd", "prompt", "unknown"]
     action: Optional[str]           # resolved command name, or None
@@ -66,6 +70,7 @@ def new_state(audio_bytes: bytes) -> VoiceState:
         confidence=0.0,
         audio_duration=0.0,
         retry_count=0,
+        should_retry=False,
         intent="unknown",
         action=None,
         aider_response=None,

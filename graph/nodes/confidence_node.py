@@ -43,7 +43,7 @@ def confidence_node(state: VoiceState) -> VoiceState:
             f"retry {new_count}/{settings.MAX_STT_RETRIES}"
         )
         log.info(log_line)
-        return VoiceState(retry_count=new_count, ui_log=[log_line])
+        return VoiceState(retry_count=new_count, should_retry=True, ui_log=[log_line])
 
     # Either confident enough, or out of retries. Proceed.
     if is_empty or below_threshold:
@@ -52,4 +52,4 @@ def confidence_node(state: VoiceState) -> VoiceState:
         log_line = f"✅ confidence={confidence:.2f} ≥ {settings.CONFIDENCE_THRESHOLD:.2f}"
 
     log.info(log_line)
-    return VoiceState(ui_log=[log_line])
+    return VoiceState(should_retry=False, ui_log=[log_line])
