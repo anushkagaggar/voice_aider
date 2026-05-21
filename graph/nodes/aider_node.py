@@ -135,10 +135,22 @@ class _AiderSession:
 
     def _send_raw(self, text: str) -> str:
         """Write a line to aider stdin, then collect stdout until quiet."""
+        # Auto-restart if aider has died (it can crash, or get killed by /exit
+        # from a prior command). Without this, one bad command poisons the rest
+        # of the session.
         if self._proc is None or self._proc.poll() is not None:
-            raise RuntimeError("aider subprocess is not running — call start() first")
-        if self._proc.stdin is None:
-            raise RuntimeError("aider stdin is not available")
+            if self._proc is not None and self._proc.poll() is not None:
+                log.warning("aider subprocess died (exit code %s) — restarting", self._proc.poll())
+                self._proc = None  # force start() to re-spawn
+                # Drain stale output from the dead session.
+                while not self._stdout_q.empty():
+                    try:
+                        self._stdout_q.get_nowait()
+                    except Exception:
+                        break
+            self.start()
+        if self._proc is None or self._proc.stdin is None:
+            raise RuntimeError("aider stdin is not available after restart")
 
         if not text.endswith("\n"):
             text += "\n"

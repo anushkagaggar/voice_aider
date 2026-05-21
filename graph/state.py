@@ -44,10 +44,8 @@ class VoiceState(TypedDict, total=False):
 
     # ---- Retry control ----
     retry_count: int                # incremented by confidence_node; max = MAX_STT_RETRIES
-
-    # ---- Retry control ----
-    retry_count: int                # incremented by confidence_node; max = MAX_STT_RETRIES
     should_retry: bool              # set by confidence_node, read by route_after_confidence
+    prev_transcript: str            # last transcript we tried — used to skip identical retries
 
     # ---- Classification outputs ----
     intent: Literal["cmd", "prompt", "unknown"]
@@ -71,6 +69,7 @@ def new_state(audio_bytes: bytes) -> VoiceState:
         audio_duration=0.0,
         retry_count=0,
         should_retry=False,
+        prev_transcript=""
         intent="unknown",
         action=None,
         aider_response=None,

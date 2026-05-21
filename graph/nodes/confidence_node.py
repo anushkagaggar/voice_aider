@@ -34,7 +34,13 @@ def confidence_node(state: VoiceState) -> VoiceState:
     below_threshold = confidence < settings.CONFIDENCE_THRESHOLD
     retries_left = retry_count < settings.MAX_STT_RETRIES
 
-    should_retry = (is_empty or below_threshold) and retries_left
+    # Whisper is deterministic given the same audio. If we already retried
+    # and got the same transcript back, retrying again will produce the same
+    # result — bail out and let classify_node handle it.
+    prev_transcript = state.get("prev_transcript", "")
+    same_as_last = retry_count > 0 and transcript.strip() == prev_transcript.strip()
+
+    should_retry = (is_empty or below_threshold) and retries_left and not same_as_last
 
     if should_retry:
         new_count = retry_count + 1
@@ -43,10 +49,17 @@ def confidence_node(state: VoiceState) -> VoiceState:
             f"retry {new_count}/{settings.MAX_STT_RETRIES}"
         )
         log.info(log_line)
-        return VoiceState(retry_count=new_count, should_retry=True, ui_log=[log_line])
+        return VoiceState(
+            retry_count=new_count,
+            should_retry=True,
+            prev_transcript=transcript,
+            ui_log=[log_line],
+        )
 
-    # Either confident enough, or out of retries. Proceed.
-    if is_empty or below_threshold:
+    # Either confident enough, or out of retries, or same transcript as last try.
+    if same_as_last:
+        log_line = f"⏭️  same transcript as last try ({transcript!r}) — skipping further retries"
+    elif is_empty or below_threshold:
         log_line = f"⏭️  retries exhausted (count={retry_count}), proceeding with low-confidence transcript"
     else:
         log_line = f"✅ confidence={confidence:.2f} ≥ {settings.CONFIDENCE_THRESHOLD:.2f}"

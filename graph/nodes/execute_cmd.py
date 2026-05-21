@@ -26,20 +26,27 @@ log = get_logger(__name__)
 
 # Mapping: action name → message piped to aider's stdin.
 # Aider accepts /-prefixed slash commands directly.
+#
+# Note: "exit"/"stop" are NOT routed to aider — they would shut down our
+# subprocess and break the rest of the session. They're handled as UI-only
+# commands; the dashboard / pipeline supervisor reads state.action == "exit"
+# and shuts everything down gracefully.
 _AIDER_SLASH_COMMANDS: dict[str, str] = {
     "clear":   "/clear",
     "undo":    "/undo",
     "save":    "/commit",
-    "exit":    "/exit",
-    "stop":    "/exit",
     "help":    "/help",
 }
 
 # UI-only commands — handled by the Streamlit dashboard reading state.json.
+# "exit"/"stop" go here too; the pipeline's main loop watches for them and
+# tears down the whole session (graceful shutdown of mic + aider).
 _UI_ONLY_COMMANDS: set[str] = {
     "history",
     "scroll_up",
     "scroll_down",
+    "exit",
+    "stop",
 }
 
 

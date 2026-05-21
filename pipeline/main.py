@@ -150,13 +150,18 @@ def _handle_utterance(pcm: np.ndarray, graph) -> None:
         _publish_status("❌ pipeline error — see terminal log")
         return
 
-    # The write_state_node already persisted final_state to state.json.
-    # We just emit a one-line terminal summary so the dev running this in a
-    # shell can see what happened without staring at the UI.
     transcript = final_state.get("transcript", "")
     intent = final_state.get("intent", "?")
     action = final_state.get("action") or ""
     log.info("◀ done: intent=%s action=%s transcript=%r", intent, action, transcript)
+
+    # Honour the voice "exit"/"stop" command: tear down the whole session.
+    if action in ("exit", "stop"):
+        log.info("Voice exit command received — shutting down session.")
+        _publish_status("👋 exiting — goodbye")
+        # The signal handler does the cleanup; SIGINT triggers it gracefully.
+        import os, signal as _signal
+        os.kill(os.getpid(), _signal.SIGINT)
 
 
 if __name__ == "__main__":
