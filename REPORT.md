@@ -143,7 +143,75 @@ Stream-end detection is also non-trivial. Aider streams tokens, so there's no ma
 
 5. **No tests for the audio capture layer.** Unit-testing `sounddevice` requires mocking PortAudio, which is more effort than it's worth for a 1-week project. The pure-Python parts (state machine, classification, IPC) do have tests in `tests/`.
 
-6. **First-time aider boot blocks the first utterance.** Subsequent utterances are fast, but the very first one waits 3–5s for aider to come up. A polish task would be to pre-warm aider during pipeline startup (currently it lazy-starts on the first prompt), trading "instant pipeline start" for "instant first utterance."
+6. **First-time aider boot blocks the first utterance.** Subsequent utterances are fast, but the very first one waits 3–5s for aider to come up. **Fixed during integration testing** — the pipeline now pre-warms aider at startup. See §11 below.
+
+---
+
+## 11. Bugs I hit during integration
+
+These all surfaced when I started using the system end-to-end with my own voice and a real Groq key. They're worth calling out because the fixes shaped the final design.
+
+### Bug 1 — Voice "exit" command killed aider mid-session
+
+Saying "exit" routed to `execute_cmd`, which sent `/exit` to the aider subprocess via the slash-command map. Aider obediently shut itself down. But the pipeline was still running, so the next utterance crashed with `RuntimeError: aider subprocess is not running`. Worse, every subsequent utterance failed because the subprocess was permanently dead.
+
+The mental model was wrong. "Exit" from the user means *exit the whole session*, not "tell aider to exit and leave the pipeline confused." Two fixes:
+
+- Moved `exit` and `stop` out of `_AIDER_SLASH_COMMANDS` and into `_UI_ONLY_COMMANDS`. They no longer go anywhere near aider.
+- Added a check at the end of the pipeline's main loop: if the resolved action is `exit` or `stop`, the supervisor sends itself a SIGINT, which triggers the existing graceful-shutdown handler that closes the mic, sends `/exit` to aider, and exits cleanly.
+
+The general lesson: when a single token name appears in two control surfaces (the user's vocabulary and the agent's CLI), they have to be deliberately mapped, not assumed to be the same thing.
+
+### Bug 2 — Retry loop ran forever after the first retry
+
+When a low-confidence transcript came back, `confidence_node` would bump `retry_count` and `route_after_confidence` would loop back to `stt_node`. So far so good. But the check in `route_after_confidence` was:
+
+```python
+if needs_retry and retry_count <= MAX_STT_RETRIES and retry_count > 0:
+    return NODE_STT
+```
+
+`retry_count` is monotonic across the graph run — once it reaches `MAX_STT_RETRIES`, `confidence_node` correctly stops bumping it. But `route_after_confidence` was still seeing `retry_count > 0` AND `retry_count <= MAX_STT_RETRIES` AND `confidence < threshold`, so it kept routing back to STT forever. The retry budget worked at the `confidence_node` level but the edge function ignored it.
+
+The fix was to stop inferring "should retry" from `retry_count` and instead use an explicit `should_retry` boolean set by `confidence_node` itself. The edge function becomes a one-liner:
+
+```python
+return NODE_STT if state.get("should_retry") else NODE_CLASSIFY
+```
+
+This decoupled "what counts as needing a retry" from "are we allowed to retry" — both belong in `confidence_node`, not split across two files. Cleaner state machine too.
+
+### Bug 3 — Whisper retries on identical low-confidence transcripts wasted budget
+
+The bigger insight from Bug 2 was that even when the retry edge worked, retrying didn't *help*: Whisper is deterministic. Given the same audio bytes, you get the same transcript and the same confidence score. Re-running STT three times on the identical audio costs three API calls and gets you nowhere.
+
+Added a `prev_transcript` field to `VoiceState`. If the current transcript matches the previous one exactly, `should_retry` returns False regardless of confidence. The log line tells the user what happened: `⏭️  same transcript as last try ('Exit.') — skipping further retries`.
+
+This turned out to matter a lot in practice. Whisper's `avg_logprob` is often pessimistic on short utterances like "exit" or "clear" — it returns confidence around 0.5 even though the transcript is perfect. Without the same-transcript skip, every command utterance burned three Whisper calls. With the skip, one.
+
+### Bug 4 — Aider was emitting prompt_toolkit warnings on Windows
+
+On Windows, aider's startup tries to render its banner via `prompt_toolkit`, which fails when stdin is piped (no real TTY console). The warning shows up at the start of aider's first response and pollutes the parsed output. Setting `--no-pretty` in the aider command line suppresses most of it. The remaining first-prompt artifact is cosmetic; subsequent prompts work fine.
+
+### Bug 5 — Aider asked for approval on every "add this file" prompt
+
+Aider has a human-in-the-loop step: when it wants to add or modify a file, it prints a diff and waits for the user to type "yes". Our pipeline never typed anything back, so aider sat there indefinitely until the quiet-window timeout fired with no useful output. Added `--yes-always` to the aider command line so it auto-accepts every diff.
+
+This is a real design choice — `--yes-always` means the agent has full write access to your repo with no review step. For an interview demo that's fine; for production code, you'd want a confirmation flow in the UI ("aider wants to modify these 3 files — approve?").
+
+### Bug 6 — Groq free-tier TPM exhaustion mid-demo
+
+The default aider invocation includes a *repo-map* in every prompt — a tokenized summary of the codebase. That came out to ~4,700 tokens per call. With Groq's free-tier limit of 6,000 TPM, two prompts in quick succession hit a rate limit and aider's internal retry-with-backoff burned 30+ seconds.
+
+Added `--map-tokens 0` to disable the repo-map. Token usage per prompt dropped to ~400. For a voice demo where the user is iterating on small functions, the repo-map adds little anyway — the agent doesn't need to know about every other file in the project to write a fibonacci function.
+
+If anyone takes this further with a paid Groq tier, flipping back to `--map-tokens 1024` would give better contextual awareness for cross-file refactors.
+
+### What these bugs have in common
+
+All six were *integration* bugs, not logic bugs in any single module. The unit tests pass (49 of them, in under a second). The graph compiles, every node does what its docstring says. But the system as a whole had emergent behaviour that only showed up when the components were composed and driven by a real human voice and a real Groq account.
+
+This is the standard outcome of "tests pass but production breaks." The lesson I take from it: integration test coverage matters as much as unit coverage. A single end-to-end test that runs a voice command through the pipeline would have caught at least Bugs 1, 2, and 3.
 
 ---
 
@@ -158,4 +226,6 @@ Stream-end detection is also non-trivial. Aider streams tokens, so there's no ma
 | Capture mode | PTT default, VAD optional | Reliability for live demo |
 | State machine | LangGraph | Explicit retry edges; data not code |
 | UI | Separate Streamlit process via state.json | Decouples mic from dashboard |
-| Aider lifecycle | Persistent subprocess + reader thread | 3-5s boot only happens once |
+| Aider lifecycle | Persistent subprocess, pre-warmed at startup, auto-restart on death | 3-5s boot only happens once, survives `/exit` and crashes |
+| Retry control | Explicit `should_retry` flag + same-transcript skip | One bug, one fix per concern; deterministic STT calls aren't worth retrying |
+| Aider flags | `--no-pretty --no-stream --yes-always --map-tokens 0` | Parseable output, atomic replies, no human-in-loop, stays under free-tier TPM |

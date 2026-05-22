@@ -1,43 +1,56 @@
 # voice-aider
 
-> Voice input interface for [aider](https://aider.chat), a terminal-based AI coding agent.
-> Speak your prompts and commands; aider's responses render in a live Streamlit dashboard.
+> A voice input interface for [aider](https://aider.chat), a terminal-based AI coding agent.
+> Hold SPACE, speak a command or coding prompt, release. Responses render in a live Streamlit dashboard.
 
 ---
 
-## Demo setup time: **~2 minutes** (after `.env` is filled in)
+## Demo setup time
 
-The bulk of that is `pip install` resolving wheels. A second-time demo on the same machine takes **~10 seconds** (just two `python` commands in two terminals).
+**~2 minutes** from a fresh clone, dominated by `pip install` resolving wheels.
+**~10 seconds** on a warm machine (just two `python` commands in two terminals).
+
+A full setup → first voice command sequence is in §4 below.
 
 ---
 
-## What it does
+## 1. What it does
 
-A two-process system:
+Two processes, one file between them.
 
 | Process | What it owns | How to run |
 |---|---|---|
-| **Voice pipeline** | mic, VAD, Groq Whisper, LangGraph state machine, the aider subprocess | `python -m pipeline.main` |
-| **Streamlit dashboard** | live transcript, confidence, intent badge, aider's response, rolling history | `streamlit run ui/app.py` |
+| **Voice pipeline** | mic, push-to-talk, VAD, Groq Whisper, LangGraph state machine, the aider subprocess | `python -m pipeline.main` |
+| **Streamlit dashboard** | live transcript, confidence, intent badge, aider's reply, rolling history | `streamlit run ui/app.py` |
 
-The two processes communicate through a single file: `tmp/state.json`, written atomically by the pipeline and polled once per second by the UI.
+The pipeline writes `tmp/state.json` atomically after every utterance; the dashboard polls it once per second. Two completely independent processes, one tiny JSON file between them.
 
-Architecture, folder layout, and the LangGraph node diagram are in **REPORT.md**.
+A walkthrough of the architecture, the LangGraph node diagram, and every key design decision — including the bugs I hit and how I fixed them — lives in **[REPORT.md](./REPORT.md)**.
 
 ---
 
-## One-time setup
+## 2. One-time setup
 
-### 1. Clone and install
+### Clone + dependencies
 
 ```bash
 git clone <repo-url> voice-aider
 cd voice-aider
-python -m venv .venv && source .venv/bin/activate   # or: .venv\Scripts\activate on Windows
+python -m venv .venv
+
+# activate the venv
+source .venv/bin/activate          # macOS / Linux
+.venv\Scripts\activate             # Windows
+
 pip install -r requirements.txt
+
+# Optional dev extras (tests, lint, type-check)
+pip install pytest pytest-cov ruff mypy
 ```
 
-### 2. Configure secrets
+> **Don't run `pip install -e .`** — on Windows paths containing spaces (e.g. `D:\data science\…`), setuptools' editable install creates a `.pth` file that shadows the local `graph` package as an empty namespace, causing `ImportError: cannot import name 'build_graph' from 'graph' (unknown location)`. The project doesn't need an editable install — `conftest.py` puts the project root on `sys.path` for tests, and the runtime commands resolve imports from the current directory.
+
+### Configure secrets
 
 ```bash
 cp .env.example .env
@@ -45,119 +58,134 @@ cp .env.example .env
 #   GROQ_API_KEY=gsk_...
 ```
 
-Get a free Groq key at <https://console.groq.com/keys>. The free tier is plenty for a live demo — Whisper STT and Llama-3.1-8b classification are both included.
+Get a free Groq key at <https://console.groq.com/keys>. The free tier handles the entire demo — Whisper STT and Llama-3.1-8b classification are both included.
 
-### 3. Create the IPC bridge folder
-
-```bash
-mkdir -p tmp && touch tmp/.gitkeep
-```
-
-### 4. (Linux only) Audio + input permissions
+### Create the IPC bridge folder
 
 ```bash
-sudo apt-get install -y portaudio19-dev   # for sounddevice on Linux
-# pynput needs no special permissions (unlike the `keyboard` package)
+mkdir -p tmp && touch tmp/.gitkeep      # macOS / Linux
+mkdir tmp && type nul > tmp\.gitkeep    # Windows
 ```
 
-macOS / Windows: nothing extra. PyPI wheels handle it.
+### (Linux only) audio prereq
+
+```bash
+sudo apt-get install -y portaudio19-dev
+```
+
+macOS and Windows ship the audio backend in the PyPI wheels — nothing extra needed.
 
 ---
 
-## Running the demo
+## 3. Verifying the install (optional but useful)
 
-You need **two terminals** open in the project root, both with the virtualenv activated.
+```bash
+pytest          # 49 tests, all should pass in <1s
+```
 
-**Terminal 1 — voice pipeline:**
+If `pytest` is green, your project structure, imports, settings loader, and graph wiring are all sane. Doesn't touch the mic or Groq.
+
+To also verify the API connection before a live demo:
+
+```bash
+python -c "from groq_clients.llm_client import classify; print(classify('refactor this to use async'))"
+```
+
+Expected: `ClassificationResult(intent='prompt', action=None)`.
+
+---
+
+## 4. Running the demo
+
+Open **two terminals** in the project root, both with the venv activated.
+
+### Terminal 1 — voice pipeline
 
 ```bash
 python -m pipeline.main
 ```
 
-You should see:
+Wait for the banner to settle on:
 
 ```
-==========================================================
-voice-aider pipeline starting
-  STT model     : whisper-large-v3
-  LLM model     : llama-3.1-8b-instant
-  Aider model   : groq/llama-3.1-8b-instant
-  Mode          : PTT (space)
-  Confidence    : 0.75 (≤2 retries)
-==========================================================
+Pre-warming aider subprocess (this takes ~3-5s)…
+Aider ready.
 MicCapture started: 16000 Hz, 480-sample frames
 Waiting for PTT (space key)…
 ```
 
-**Terminal 2 — UI:**
+Aider is pre-warmed at startup so the first voice command doesn't pay the 3-5 second cold-start tax.
+
+### Terminal 2 — UI
 
 ```bash
 streamlit run ui/app.py
 ```
 
-Streamlit opens <http://localhost:8501> in your browser. The dashboard shows mode, status, the latest transcript, aider's reply, and a rolling history.
+A browser opens at `http://localhost:8501`. Sidebar has the voice command cheat-sheet; main area shows mode, status, latest turn, aider's reply, and rolling history.
+
+### Speak
+
+The PTT key is **SPACEBAR**, configured in `.env`. Hold it down, speak, release. Within 1–2 seconds the dashboard reflects the turn.
+
+Suggested demo sequence (covers all three branches of the LangGraph conditional edge):
+
+| Say | What you should see |
+|---|---|
+| "Write a function that reverses a string" | Transcript appears, intent=`prompt → aider`, aider's reply renders in the agent-output panel, history gets a new entry |
+| "Clear" | Fuzzy match → `/clear` sent to aider, confirmation in the cmd-result row |
+| "Exit" | Pipeline detects the exit intent, both processes shut down cleanly |
 
 ---
 
-## How to use it
+## 5. Voice command reference
 
-The default mode is **push-to-talk** (PTT) on the SPACEBAR.
-
-1. **Hold SPACE.** Speak your prompt or command.
-2. **Release SPACE.** The pipeline transcribes, classifies, and either runs the command or sends the prompt to aider.
-3. **Watch the dashboard.** Transcript, confidence, and aider's response appear within ~1–2 seconds.
-
-To switch to fully hands-free mode (WebRTC VAD silence-detection, no key needed): set `HANDS_FREE_MODE=true` in `.env` and restart the pipeline.
-
----
-
-## Voice command reference
-
-Anything not in this list is treated as a prompt for aider.
+Anything not in this list is sent to aider as a free-form coding prompt.
 
 | Say… | What happens |
 |---|---|
-| **"clear"**, "clear screen" | Clears aider's chat history (`/clear`) |
-| **"undo"**, "undo that", "revert" | Reverts aider's last edit (`/undo`) |
-| **"save"**, "commit" | Commits current changes (`/commit`) |
-| **"exit"**, "quit", "stop session" | Shuts down aider (`/exit`) |
-| **"help"** | Shows aider's help (`/help`) |
-| **"history"**, "what did I say" | Highlights the history panel in the UI |
-| **"scroll up"** / **"scroll down"** | UI-only navigation |
+| **"clear"**, "clear screen" | `/clear` to aider (resets the chat history) |
+| **"undo"**, "undo that", "revert", "go back" | `/undo` to aider (reverts the last edit) |
+| **"save"**, "commit" | `/commit` to aider |
+| **"help"** | `/help` to aider |
+| **"exit"**, "quit", "stop session" | Shuts down the whole session — mic, aider, pipeline |
+| **"history"**, "what did I say" | UI-only — highlights the history panel |
+| **"scroll up"** / **"scroll down"** | UI-only — page navigation |
 | **anything else** | Sent to aider as a prompt |
 
-**Examples of prompts:**
-
-- "Write a Python function that returns the Fibonacci sequence up to n."
-- "Refactor this file to use async/await."
-- "Add a docstring to every function in `utils/`."
-- "Explain what the `aider_node` does."
+Examples of free-form prompts that work well in a demo: *"Write a Python function that returns the Fibonacci sequence up to n"*, *"Refactor this file to use async/await"*, *"Explain what the aider_node does"*, *"Add a docstring to every function in utils/"*.
 
 ---
 
-## Configuration knobs
+## 6. Configuration knobs
 
-Edit `.env` to tune behaviour without touching code:
+Edit `.env` to tune behaviour without touching code. Everything is loaded by `python-dotenv` through `pydantic-settings`; there are no raw `os.getenv` calls anywhere in the project.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CONFIDENCE_THRESHOLD` | `0.75` | Below this, `stt_node` retries |
-| `MAX_STT_RETRIES` | `2` | Retry budget per utterance |
-| `VAD_AGGRESSIVENESS` | `2` | `0` (loose) → `3` (strict) |
-| `SILENCE_TIMEOUT_MS` | `800` | End-of-utterance silence window for VAD |
+| `GROQ_API_KEY` | *(required)* | Free key from console.groq.com |
+| `GROQ_STT_MODEL` | `whisper-large-v3` | swap for `whisper-large-v3-turbo` if you want lower latency |
+| `GROQ_LLM_MODEL` | `llama-3.1-8b-instant` | used by `classify_node` |
+| `CONFIDENCE_THRESHOLD` | `0.75` | below this, `stt_node` retries (capped by `MAX_STT_RETRIES`) |
+| `MAX_STT_RETRIES` | `2` | retry budget per utterance |
+| `VAD_AGGRESSIVENESS` | `2` | `0` (loose) → `3` (strict). Only matters in hands-free mode. |
+| `SILENCE_TIMEOUT_MS` | `800` | end-of-utterance silence window for VAD |
 | `PUSH_TO_TALK_KEY` | `space` | `space` / `ctrl` / `alt` |
 | `HANDS_FREE_MODE` | `false` | `true` → pure VAD, no key needed |
-| `AIDER_MODEL` | `groq/llama-3.1-8b-instant` | Any model aider supports |
+| `AIDER_MODEL` | `groq/llama-3.1-8b-instant` | any model aider supports |
+| `AIDER_EXTRA_ARGS` | `--no-auto-commit` | merged into the aider command line |
+
+The aider subprocess is started with `--no-pretty --no-stream --yes-always --map-tokens 0 --no-show-model-warnings --no-check-update`. These flags keep the output parseable (no `prompt_toolkit` TTY assumptions), make replies atomic instead of token-streamed (matches our quiet-window detection), auto-accept add-to-chat prompts, and disable the repo-map so we stay well under Groq's free-tier 6k TPM limit. If you upgrade to a paid Groq tier, set `AIDER_EXTRA_ARGS=--map-tokens 1024 --no-auto-commit` for richer codebase awareness.
 
 ---
 
-## Project layout
+## 7. Project layout
 
 ```
 voice-aider/
 ├── pipeline/                # voice process: mic + VAD + main loop
 │   ├── main.py              # entry: `python -m pipeline.main`
-│   ├── capture.py           # mic input, push-to-talk (sounddevice + pynput)
+│   ├── capture.py           # sounddevice mic input, pynput push-to-talk
 │   └── vad.py               # WebRTC VAD silence detection (hands-free mode)
 ├── graph/                   # LangGraph state machine
 │   ├── voice_graph.py       # StateGraph wiring
@@ -165,10 +193,10 @@ voice-aider/
 │   ├── edges.py             # conditional routing functions
 │   └── nodes/
 │       ├── stt_node.py            # Groq Whisper → transcript + confidence
-│       ├── confidence_node.py     # retry gate
+│       ├── confidence_node.py     # retry gate (skips identical retries)
 │       ├── classify_node.py       # fuzzy allowlist → Groq Llama fallback
-│       ├── execute_cmd.py         # slash commands → aider stdin
-│       ├── aider_node.py          # persistent aider subprocess + I/O
+│       ├── execute_cmd.py         # cmd → aider slash command or UI signal
+│       ├── aider_node.py          # persistent aider subprocess + auto-restart
 │       └── write_state_node.py    # state → tmp/state.json
 ├── groq_clients/
 │   ├── whisper_client.py    # confidence proxy from segment avg_logprob
@@ -185,28 +213,29 @@ voice-aider/
 │   ├── audio_utils.py       # int16 PCM ↔ WAV bytes
 │   ├── logger.py            # module-scoped logging
 │   └── state_bridge.py      # atomic JSON writes for IPC
-├── tmp/
-│   └── state.json           # IPC bridge (runtime; .gitignored except .gitkeep)
-├── tests/
+├── tests/                   # 49 tests, all pass in <1s
+├── tmp/                     # IPC bridge (runtime; .gitignored except .gitkeep)
+├── conftest.py              # root pytest conftest — sys.path bootstrap
 ├── .env.example
 ├── requirements.txt
-├── README.md
-└── REPORT.md                # design narrative
+├── pyproject.toml           # pytest + ruff + mypy config (NOT an installable package)
+├── README.md                # this file
+└── REPORT.md                # design narrative + honest limitations
 ```
 
 ---
 
-## Troubleshooting
+## 8. Troubleshooting
 
-**"aider executable not found"** — Aider isn't installed. `pip install aider-chat` (already in requirements.txt; happens if you skipped `pip install -r`).
-
-**The UI shows "waiting for pipeline…" forever** — The pipeline process isn't running. Start Terminal 1.
-
-**PTT doesn't trigger on Linux without sudo** — You're probably using the `keyboard` package by accident. This project uses `pynput`, which doesn't need root.
-
-**Whisper returns empty transcripts** — Your mic might be muted, or `VAD_AGGRESSIVENESS` is set too high. Try `1` or `0` in `.env`.
-
-**"GROQ_API_KEY missing"** — `.env` isn't being picked up. Confirm it's in the project root (same folder as `requirements.txt`), not in `pipeline/` or `ui/`.
+| Symptom | Cause / fix |
+|---|---|
+| `ImportError: cannot import name X from 'graph' (unknown location)` | Most likely you ran `pip install -e .` and got a broken editable install. Run `pip uninstall -y voice-aider`, delete `venv\Lib\site-packages\__editable__*.pth`, clear `__pycache__`, restart. |
+| `aider executable not found` | `pip install aider-chat` (already in requirements.txt — happens if you skipped `pip install -r`). |
+| Dashboard stays on "waiting for pipeline…" | The pipeline process isn't running. Start Terminal 1. |
+| Whisper returns empty transcripts | Mic muted, or `VAD_AGGRESSIVENESS=3` cutting off soft speech. Try `1` or `0`. |
+| `GROQ_API_KEY missing` | `.env` not in the project root (must sit next to `requirements.txt`, not inside `pipeline/` or `ui/`). |
+| Rate-limit errors mid-demo | You're on Groq free tier (6k TPM). `--map-tokens 0` already mitigates this; if it still fires, wait 60s. |
+| Windows: `prompt_toolkit` "No Windows console" warning in aider's reply | Cosmetic; aider's response follows the warning correctly. `--no-pretty` flag suppresses most of it. |
 
 ---
 
