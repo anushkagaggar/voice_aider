@@ -73,8 +73,12 @@ class _AiderSession:
             cmd = [
                 "aider",
                 "--model", settings.AIDER_MODEL,
-                "--no-pretty",          # disable prompt_toolkit / colored output
-                "--no-stream",          # one-shot replies instead of streaming
+                "--no-pretty",            # disable prompt_toolkit / colored output
+                "--no-stream",            # one-shot replies instead of streaming
+                "--yes-always",           # auto-accept ALL prompts (no human-in-loop)
+                "--map-tokens", "0",      # disable repo-map to stay under TPM limit
+                "--no-show-model-warnings",
+                "--no-check-update",      # don't ping aider's update server
                 *settings.aider_args_list,
             ]
             log.info("Starting aider: %s", " ".join(shlex.quote(c) for c in cmd))
